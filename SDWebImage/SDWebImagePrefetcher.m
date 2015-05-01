@@ -113,7 +113,7 @@
             
             #ifdef DEBUG
                 if (1)
-                    HTLog(@"Prefetching: %@", url);
+                    NSLog(@"Prefetching: %@", url);
             #endif
             
             if (options & SDWebImageUsePrefetcherOptionsExceptPriority)
@@ -192,7 +192,10 @@
                                 if (!batchItem.prefetchItemsLeft.count) {
                                     batchItem.skippedCount = batchItem.URLs.count - batchItem.finishedCount; // Safety
                                     
-                                    HTLog(@"Finished prefetching (%@ successful, %@ skipped, timeElasped %.2f)", @(batchItem.finishedCount), @(batchItem.skippedCount), CFAbsoluteTimeGetCurrent() - batchItem.startedTime);
+                                    #ifdef DEBUG
+                                        if (1)
+                                            NSLog(@"Finished prefetching (%@ successful, %@ skipped, timeElasped %.2f)", @(batchItem.finishedCount), @(batchItem.skippedCount), CFAbsoluteTimeGetCurrent() - batchItem.startedTime);
+                                    #endif
                                     
                                     NSUInteger finishedCount = batchItem.finishedCount;
                                     NSUInteger skippedCount = batchItem.skippedCount;

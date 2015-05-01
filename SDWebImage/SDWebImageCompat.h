@@ -58,9 +58,6 @@ inline static void dispatch_async_main_queue_after(double delayInSeconds, dispat
 inline static void dispatch_async_main_queue_ifnotmain(dispatch_block_t block) { if ([NSThread isMainThread]) block(); else dispatch_async(dispatch_get_main_queue(), block); }
 inline static void dispatch_sync_main_queue_safe(dispatch_block_t block) { if ([NSThread isMainThread]) block(); else dispatch_sync(dispatch_get_main_queue(), block); }
 
-extern void _HTLog(const char *file, int lineNumber, const char func[], NSString *format, ...);
-extern void _HTNoEchoLog(const char *file, int lineNumber, const char func[], NSString *format, ...);
-
 typedef NS_OPTIONS(NSUInteger, SDWebImageScaledOptions) {
     /**
      * By default, only images with @2x in their actual filename are considered @2x assets.
