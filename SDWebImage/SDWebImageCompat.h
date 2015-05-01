@@ -51,22 +51,24 @@
 #define SDDispatchQueueSetterSementics assign
 #endif
 
+extern dispatch_queue_t dispatch_get_ht_shared_queue();
+
+inline static void dispatch_async_main_queue(dispatch_block_t block) { dispatch_async(dispatch_get_main_queue(), block); }
+inline static void dispatch_async_main_queue_after(double delayInSeconds, dispatch_block_t block) { dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delayInSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), block); }
+inline static void dispatch_async_main_queue_ifnotmain(dispatch_block_t block) { if ([NSThread isMainThread]) block(); else dispatch_async(dispatch_get_main_queue(), block); }
+inline static void dispatch_sync_main_queue_safe(dispatch_block_t block) { if ([NSThread isMainThread]) block(); else dispatch_sync(dispatch_get_main_queue(), block); }
+
+extern void _HTLog(const char *file, int lineNumber, const char func[], NSString *format, ...);
+extern void _HTNoEchoLog(const char *file, int lineNumber, const char func[], NSString *format, ...);
+
+typedef NS_OPTIONS(NSUInteger, SDWebImageScaledOptions) {
+    /**
+     * By default, only images with @2x in their actual filename are considered @2x assets.
+     * This setting treats the file as @2x regardless, and will appropriately set to scale=2
+     * in cases which it is not already.
+     */
+    SDWebImageScaledLoadAsRetinaImage = 1 << 16,
+};
+
 extern UIImage *SDScaledImageForKey(NSString *key, UIImage *image);
-
-typedef void(^SDWebImageNoParamsBlock)();
-
-extern NSString *const SDWebImageErrorDomain;
-
-#define dispatch_main_sync_safe(block)\
-    if ([NSThread isMainThread]) {\
-        block();\
-    } else {\
-        dispatch_sync(dispatch_get_main_queue(), block);\
-    }
-
-#define dispatch_main_async_safe(block)\
-    if ([NSThread isMainThread]) {\
-        block();\
-    } else {\
-        dispatch_async(dispatch_get_main_queue(), block);\
-    }
+extern UIImage *SDScaledImageForOptions(SDWebImageScaledOptions options, UIImage *image);

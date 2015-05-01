@@ -12,6 +12,10 @@
 @implementation UIImage (GIF)
 
 + (UIImage *)sd_animatedGIFWithData:(NSData *)data {
+    return [UIImage sd_animatedGIFWithData:data scale:1];
+}
+
++ (UIImage *)sd_animatedGIFWithData:(NSData *)data scale:(CGFloat)scale {
     if (!data) {
         return nil;
     }
@@ -33,9 +37,9 @@
         for (size_t i = 0; i < count; i++) {
             CGImageRef image = CGImageSourceCreateImageAtIndex(source, i, NULL);
 
-            duration += [self sd_frameDurationAtIndex:i source:source];
+            duration += [self frameDurationAtIndex:i source:source];
 
-            [images addObject:[UIImage imageWithCGImage:image scale:[UIScreen mainScreen].scale orientation:UIImageOrientationUp]];
+            [images addObject:[UIImage imageWithCGImage:image scale:scale orientation:UIImageOrientationUp]];
 
             CGImageRelease(image);
         }
@@ -43,7 +47,8 @@
         if (!duration) {
             duration = (1.0f / 10.0f) * count;
         }
-
+        
+        // This does an *AVERAGE* duration, which is implementation limited.
         animatedImage = [UIImage animatedImageWithImages:images duration:duration];
     }
 
@@ -52,7 +57,7 @@
     return animatedImage;
 }
 
-+ (float)sd_frameDurationAtIndex:(NSUInteger)index source:(CGImageSourceRef)source {
++ (float)frameDurationAtIndex:(NSUInteger)index source:(CGImageSourceRef)source {
     float frameDuration = 0.1f;
     CFDictionaryRef cfFrameProperties = CGImageSourceCopyPropertiesAtIndex(source, index, nil);
     NSDictionary *frameProperties = (__bridge NSDictionary *)cfFrameProperties;
@@ -84,38 +89,36 @@
 }
 
 + (UIImage *)sd_animatedGIFNamed:(NSString *)name {
-    CGFloat scale = [UIScreen mainScreen].scale;
-
-    if (scale > 1.0f) {
-        NSString *retinaPath = [[NSBundle mainBundle] pathForResource:[name stringByAppendingString:@"@2x"] ofType:@"gif"];
-
-        NSData *data = [NSData dataWithContentsOfFile:retinaPath];
-
-        if (data) {
-            return [UIImage sd_animatedGIFWithData:data];
-        }
-
-        NSString *path = [[NSBundle mainBundle] pathForResource:name ofType:@"gif"];
-
-        data = [NSData dataWithContentsOfFile:path];
-
-        if (data) {
-            return [UIImage sd_animatedGIFWithData:data];
-        }
-
-        return [UIImage imageNamed:name];
+    if ([name hasSuffix:@"@3x"])
+        name = [name substringToIndex:name.length - @"@3x".length];
+    if ([name hasSuffix:@"@2x"])
+        name = [name substringToIndex:name.length - @"@2x".length];
+    
+    NSString *hdRetinaPath = [[NSBundle mainBundle] pathForResource:[name stringByAppendingString:@"@2x"] ofType:@"gif"];
+    
+    NSData *data = [NSData dataWithContentsOfFile:hdRetinaPath];
+    
+    if (data) {
+        return [UIImage sd_animatedGIFWithData:data scale:3];
     }
-    else {
-        NSString *path = [[NSBundle mainBundle] pathForResource:name ofType:@"gif"];
+    
+    NSString *retinaPath = [[NSBundle mainBundle] pathForResource:[name stringByAppendingString:@"@2x"] ofType:@"gif"];
 
-        NSData *data = [NSData dataWithContentsOfFile:path];
-
-        if (data) {
-            return [UIImage sd_animatedGIFWithData:data];
-        }
-
-        return [UIImage imageNamed:name];
+    data = [NSData dataWithContentsOfFile:retinaPath];
+    
+    if (data) {
+        return [UIImage sd_animatedGIFWithData:data scale:2];
     }
+
+    NSString *path = [[NSBundle mainBundle] pathForResource:name ofType:@"gif"];
+
+    data = [NSData dataWithContentsOfFile:path];
+
+    if (data) {
+        return [UIImage sd_animatedGIFWithData:data scale:1];
+    }
+
+    return [UIImage imageNamed:name];
 }
 
 - (UIImage *)sd_animatedImageByScalingAndCroppingToSize:(CGSize)size {
@@ -141,7 +144,7 @@
 
     NSMutableArray *scaledImages = [NSMutableArray array];
 
-    UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
+    UIGraphicsBeginImageContextWithOptions(size, NO, self.scale);
 
     for (UIImage *image in self.images) {
         [image drawInRect:CGRectMake(thumbnailPoint.x, thumbnailPoint.y, scaledSize.width, scaledSize.height)];

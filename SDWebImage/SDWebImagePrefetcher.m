@@ -7,21 +7,66 @@
  */
 
 #import "SDWebImagePrefetcher.h"
+#import "SDWebImageManager.h"
 
-#if (!defined(DEBUG) && !defined (SD_VERBOSE)) || defined(SD_LOG_NONE)
+#if !defined(DEBUG) && !defined (SD_VERBOSE)
 #define NSLog(...)
 #endif
 
+@interface SDWebImagePrefetchItem : NSObject
+@property (nonatomic, strong) SDWebImageCombinedOperation *operation;
+@property (nonatomic, strong) NSMutableSet *batchIndicies;
+@property (nonatomic, strong) NSURL *url;
+- (void)cancelOperation;
+@end
+@implementation SDWebImagePrefetchItem
+- (instancetype)initWithBatchIndex:(NSNumber *)batchIndex URL:(NSURL *)url {
+    if ((self = [super init])) {
+        _batchIndicies = [NSMutableSet setWithObject:batchIndex];
+        _url = url;
+    }
+    return self;
+}
+- (void)cancelOperation {
+    [_operation cancel];
+}
+@end
+
+@interface SDWebImageBatchItem : NSObject
+@property (nonatomic, strong) NSMutableArray *prefetchItemsLeft;
+@property (nonatomic, strong) NSArray *URLs;
+@property (nonatomic, strong) NSArray *URLOptions;
+@property (nonatomic, assign) NSUInteger skippedCount;
+@property (nonatomic, assign) NSUInteger finishedCount;
+@property (nonatomic, assign) NSTimeInterval startedTime;
+@property (nonatomic, copy) SDWebImagePrefetchStartedBlock startedBlock;
+@property (nonatomic, copy) SDWebImagePrefetchProgressBlock progressBlock;
+@property (nonatomic, copy) SDWebImagePrefetchCompletionBlock completionBlock;
+@property (nonatomic, assign) BOOL canceled;
+@end
+@implementation SDWebImageBatchItem
+- (instancetype)initWithURLs:(NSArray *)urls URLOptions:(NSArray*)urlOptions startedBlock:(SDWebImagePrefetchStartedBlock)startedBlock progressBlock:(SDWebImagePrefetchProgressBlock)progressBlock completionBlock:(SDWebImagePrefetchCompletionBlock)completionBlock {
+    if ((self = [super init])) {
+        _prefetchItemsLeft = [[NSMutableArray alloc] initWithCapacity:urls.count];
+        self.URLs = urls;
+        self.URLOptions = urlOptions;
+        _skippedCount = _finishedCount = 0;
+        _startedTime = CFAbsoluteTimeGetCurrent();
+        self.startedBlock = startedBlock;
+        self.progressBlock = progressBlock;
+        self.completionBlock = completionBlock;
+    }
+    return self;
+}
+@end
+
 @interface SDWebImagePrefetcher ()
 
-@property (strong, nonatomic) SDWebImageManager *manager;
-@property (strong, nonatomic) NSArray *prefetchURLs;
-@property (assign, nonatomic) NSUInteger requestedCount;
-@property (assign, nonatomic) NSUInteger skippedCount;
-@property (assign, nonatomic) NSUInteger finishedCount;
-@property (assign, nonatomic) NSTimeInterval startedTime;
-@property (copy, nonatomic) SDWebImagePrefetcherCompletionBlock completionBlock;
-@property (copy, nonatomic) SDWebImagePrefetcherProgressBlock progressBlock;
+@property (nonatomic, strong) SDWebImageManager *manager;
+
+@property (nonatomic, assign) NSUInteger nextBatchIndex;
+@property (nonatomic, strong) NSMutableDictionary *prefetchItems; // URL->SDWebImagePrefetchItem
+@property (nonatomic, strong) NSMutableDictionary *batchItems; // batchIndex->SDWebImageBatchItem
 
 @end
 
@@ -31,115 +76,277 @@
     static dispatch_once_t once;
     static id instance;
     dispatch_once(&once, ^{
-        instance = [self new];
+        instance = [[self alloc] initWithManager:[SDWebImageManager sharedManager]];
     });
     return instance;
 }
 
-- (id)init {
+- (instancetype)init {
+    return [self initWithManager:[SDWebImageManager new]];
+}
+
+- (instancetype)initWithManager:(SDWebImageManager *)manager {
     if ((self = [super init])) {
-        _manager = [SDWebImageManager new];
-        _options = SDWebImageLowPriority;
-        _prefetcherQueue = dispatch_get_main_queue();
-        self.maxConcurrentDownloads = 3;
+        _manager = manager;
+        _options = SDWebImageProgressiveDownload | (([[UIScreen mainScreen] respondsToSelector:@selector(scale)] && (int)[[UIScreen mainScreen] scale] >= 2) ? SDWebImageLoadAsRetinaImage : 0) | SDWebImageLowPriority | SDWebImageUsePrefetcherSizeLimit;
+        
+        _prefetchItems = [NSMutableDictionary new];
+        _batchItems = [NSMutableDictionary new];
     }
     return self;
 }
 
-- (void)setMaxConcurrentDownloads:(NSUInteger)maxConcurrentDownloads {
-    self.manager.imageDownloader.maxConcurrentDownloads = maxConcurrentDownloads;
+- (NSUInteger)prefetchURLsCount {
+    return _prefetchItems.count;
 }
 
-- (NSUInteger)maxConcurrentDownloads {
-    return self.manager.imageDownloader.maxConcurrentDownloads;
+- (void)startPrefetchForBatchIndex:(NSNumber *)sourceBatchIndex {
+    @synchronized(self) {
+        SDWebImageBatchItem *sourceBatchItem = [_batchItems objectForKey:sourceBatchIndex];
+        
+        if (sourceBatchItem.canceled)
+            return;
+        
+        for (NSUInteger urlIndex = 0; urlIndex < sourceBatchItem.URLs.count; ++urlIndex) {
+            NSURL *url = [sourceBatchItem.URLs objectAtIndex:urlIndex];
+            SDWebImageOptions options = (urlIndex < sourceBatchItem.URLOptions.count && (id)[sourceBatchItem.URLOptions objectAtIndex:urlIndex] != (id)[NSNull null] ? [[sourceBatchItem.URLOptions  objectAtIndex:urlIndex] unsignedIntegerValue] : self.options);
+            
+            #ifdef DEBUG
+                if (1)
+                    HTLog(@"Prefetching: %@", url);
+            #endif
+            
+            if (options & SDWebImageUsePrefetcherOptionsExceptPriority)
+                options = (self.options & ~(SDWebImageLowPriority | SDWebImageHighPriority)) | (options & (SDWebImageLowPriority | SDWebImageHighPriority));
+            else if (options & SDWebImageUsePrefetcherOptions)
+                options = self.options;
+            
+            BOOL startOperation = NO;
+            SDWebImagePrefetchItem *prefetchItem = [_prefetchItems objectForKey:url];
+            
+            if (!prefetchItem) {
+                prefetchItem = [[SDWebImagePrefetchItem alloc] initWithBatchIndex:sourceBatchIndex URL:url];
+                startOperation = YES;
+            } else
+                [prefetchItem.batchIndicies addObject:sourceBatchIndex];
+            if (prefetchItem)
+                [sourceBatchItem.prefetchItemsLeft addObject:prefetchItem];
+            
+            if (prefetchItem && startOperation) {
+                SDWebImageCompletedWithFinishedBlock completionBlock = ^(UIImage *image, NSError *error, SDImageCacheType cacheType, BOOL finished) {
+                    if (!(finished || error))
+                        return;
+                    
+                    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+                        @synchronized(self) {
+                            if ([prefetchItem.operation respondsToSelector:@selector(isCancelled)] && [(id)prefetchItem.operation isCancelled])
+                                return;
+                            
+                            [_prefetchItems removeObjectForKey:prefetchItem.url];
+                            
+                            for (NSNumber *batchIndex in prefetchItem.batchIndicies) {
+                                SDWebImageBatchItem *batchItem = [_batchItems objectForKey:batchIndex];
+                                
+                                [batchItem.prefetchItemsLeft removeObject:prefetchItem];
+                                
+                                if (image) {
+                                    batchItem.finishedCount++;
+                                    
+                                    NSUInteger finishedCount = batchItem.finishedCount;
+                                    NSUInteger skippedCount = batchItem.skippedCount;
+                                    
+                                    dispatch_async_main_queue(^{
+                                        if (batchItem.progressBlock)
+                                            batchItem.progressBlock(url, YES, finishedCount, skippedCount);
+                                        
+                                        if ([self.delegate respondsToSelector:@selector(imagePrefetcher:didPrefetchURL:forBatchIndex:withFinishedCount:skippedCount:)])
+                                            [self.delegate imagePrefetcher:self
+                                                            didPrefetchURL:url
+                                                             forBatchIndex:batchIndex
+                                                         withFinishedCount:finishedCount
+                                                              skippedCount:skippedCount];
+                                    });
+                                }
+                                else {
+                                    batchItem.skippedCount++;
+                                    
+                                    NSUInteger finishedCount = batchItem.finishedCount;
+                                    NSUInteger skippedCount = batchItem.skippedCount;
+                                    
+                                    dispatch_async_main_queue(^{
+                                        if (batchItem.progressBlock) {
+                                            batchItem.progressBlock(url, NO, finishedCount, skippedCount);
+                                        }
+                                        
+                                        if ([self.delegate respondsToSelector:@selector(imagePrefetcher:didFailPrefetchingURL:error:forBatchIndex:withFinishedCount:skippedCount:)]) {
+                                            [self.delegate imagePrefetcher:self
+                                                     didFailPrefetchingURL:url
+                                                                     error:error
+                                                             forBatchIndex:batchIndex
+                                                         withFinishedCount:finishedCount
+                                                              skippedCount:skippedCount];
+                                        }
+                                    });
+                                }
+                                
+                                if (!batchItem.prefetchItemsLeft.count) {
+                                    batchItem.skippedCount = batchItem.URLs.count - batchItem.finishedCount; // Safety
+                                    
+                                    HTLog(@"Finished prefetching (%@ successful, %@ skipped, timeElasped %.2f)", @(batchItem.finishedCount), @(batchItem.skippedCount), CFAbsoluteTimeGetCurrent() - batchItem.startedTime);
+                                    
+                                    NSUInteger finishedCount = batchItem.finishedCount;
+                                    NSUInteger skippedCount = batchItem.skippedCount;
+                                    
+                                    dispatch_async_main_queue(^{
+                                        if (batchItem.completionBlock)
+                                            batchItem.completionBlock(finishedCount, skippedCount);
+                                        
+                                        if ([self.delegate respondsToSelector:@selector(imagePrefetcher:didFinishForBatchIndex:withFinishedCount:skippedCount:)])
+                                            [self.delegate imagePrefetcher:self
+                                                    didFinishForBatchIndex:batchIndex
+                                                         withFinishedCount:finishedCount
+                                                              skippedCount:skippedCount];
+                                    });
+                                    
+                                    [_batchItems removeObjectForKey:batchIndex];
+                                }
+                            }
+                        }
+                    });
+                };
+                
+                // NOTE: I would like to keep this off the main thread, but we're having race conditions that I don't care to spend a lot of time fixing. --Johanna
+                //dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
+                dispatch_async_main_queue(^{
+                    if (sourceBatchItem.canceled)
+                        return;
+                    
+                    if (!(options & SDWebImageNoPrefetching) && ![self.manager downloadOperationsForURL:url].count) {
+                        prefetchItem.operation = [self.manager downloadWithURL:url options:options progress:nil completed:[completionBlock copy]];
+                    } else if (completionBlock)
+                        completionBlock(nil, nil, SDImageCacheTypeNone, YES);
+                });
+            }
+        }
+        
+        dispatch_async_main_queue(^{
+            if (sourceBatchItem.canceled)
+                return;
+            
+            if (sourceBatchItem.startedBlock)
+                sourceBatchItem.startedBlock(sourceBatchIndex);
+        });
+    }
 }
 
-- (void)startPrefetchingAtIndex:(NSUInteger)index {
-    if (index >= self.prefetchURLs.count) return;
-    self.requestedCount++;
-    [self.manager downloadImageWithURL:self.prefetchURLs[index] options:self.options progress:nil completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, BOOL finished, NSURL *imageURL) {
-        if (!finished) return;
-        self.finishedCount++;
+- (NSNumber *)prefetchURLs:(NSArray *)urls {
+    return [self prefetchURLs:urls URLOptions:nil started:nil progress:nil completed:nil];
+}
 
-        if (image) {
-            if (self.progressBlock) {
-                self.progressBlock(self.finishedCount,[self.prefetchURLs count]);
-            }
-            NSLog(@"Prefetched %@ out of %@", @(self.finishedCount), @(self.prefetchURLs.count));
-        }
-        else {
-            if (self.progressBlock) {
-                self.progressBlock(self.finishedCount,[self.prefetchURLs count]);
-            }
-            NSLog(@"Prefetched %@ out of %@ (Failed)", @(self.finishedCount), @(self.prefetchURLs.count));
+- (NSNumber *)prefetchURLs:(NSArray *)urls URLOptions:(NSArray *)urlOptions {
+    return [self prefetchURLs:urls URLOptions:urlOptions started:nil progress:nil completed:nil];
+}
 
-            // Add last failed
-            self.skippedCount++;
+- (NSNumber *)prefetchURLs:(NSArray *)urls progress:(SDWebImagePrefetchProgressBlock)progressBlock completed:(SDWebImagePrefetchCompletionBlock)completionBlock {
+    return [self prefetchURLs:urls URLOptions:nil started:nil progress:progressBlock completed:completionBlock];
+}
+
+- (NSNumber *)prefetchURLs:(NSArray *)urls URLOptions:(NSArray *)urlOptions progress:(SDWebImagePrefetchProgressBlock)progressBlock completed:(SDWebImagePrefetchCompletionBlock)completionBlock {
+    return [self prefetchURLs:urls URLOptions:urlOptions started:nil progress:progressBlock completed:completionBlock];
+}
+
+- (NSNumber *)prefetchURLs:(NSArray *)urls URLOptions:(NSArray *)urlOptions started:(SDWebImagePrefetchStartedBlock)startedBlock progress:(SDWebImagePrefetchProgressBlock)progressBlock completed:(SDWebImagePrefetchCompletionBlock)completionBlock {
+    NSNumber *batchIndex = nil;
+    
+    if (urls.count) {
+        @synchronized(self) {
+            batchIndex = @(_nextBatchIndex++);
+            SDWebImageBatchItem *batchItem = [[SDWebImageBatchItem alloc] initWithURLs:urls URLOptions:(urlOptions.count == urls.count ? urlOptions : nil) startedBlock:startedBlock progressBlock:progressBlock completionBlock:completionBlock];
+            
+            [_batchItems setObject:batchItem forKey:batchIndex];
         }
-        if ([self.delegate respondsToSelector:@selector(imagePrefetcher:didPrefetchURL:finishedCount:totalCount:)]) {
-            [self.delegate imagePrefetcher:self
-                            didPrefetchURL:self.prefetchURLs[index]
-                             finishedCount:self.finishedCount
-                                totalCount:self.prefetchURLs.count
-            ];
+        
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            //dispatch_async_main_queue_ifnotmain(^{
+            [self startPrefetchForBatchIndex:batchIndex];
+        });
+    }
+    
+    return batchIndex;
+}
+
+- (SDWebImageCombinedOperation *)operationForURL:(NSURL *)url {
+    return [[_prefetchItems objectForKey:url] operation];
+}
+
+- (void)cancelAllPrefetching {
+    @synchronized(self) {
+        for (NSNumber *batchIndex in _batchItems.allKeys) {
+            [self _cancelPrefetchingForBatchIndex:batchIndex];
         }
-        if (self.prefetchURLs.count > self.requestedCount) {
-            dispatch_async(self.prefetcherQueue, ^{
-                [self startPrefetchingAtIndex:self.requestedCount];
+    }
+}
+
+- (void)cancelPrefetchingForBatchIndex:(NSNumber *)batchIndex {
+    if (batchIndex) {
+        @synchronized(self) {
+            [self _cancelPrefetchingForBatchIndex:batchIndex];
+        }
+    }
+}
+
+- (void)_cancelPrefetchingForBatchIndex:(NSNumber *)batchIndex {
+    SDWebImageBatchItem *batchItem = [_batchItems objectForKey:batchIndex];
+    batchItem.canceled = YES;
+    
+    if (batchItem) {
+        BOOL werePrefetchItemsLeft = batchItem.prefetchItemsLeft.count;
+        
+        for (SDWebImagePrefetchItem *prefetchItem in batchItem.prefetchItemsLeft) {
+            [prefetchItem cancelOperation];
+            
+            batchItem.skippedCount++;
+            
+            NSURL *url = prefetchItem.url;
+            NSUInteger finishedCount = batchItem.finishedCount;
+            NSUInteger skippedCount = batchItem.skippedCount;
+            
+            dispatch_async_main_queue(^{
+                if (batchItem.progressBlock) {
+                    batchItem.progressBlock(url, NO, finishedCount, skippedCount);
+                }
+                
+                if ([self.delegate respondsToSelector:@selector(imagePrefetcher:didCancelPrefetchingURL:forBatchIndex:withFinishedCount:skippedCount:)]) {
+                    [self.delegate imagePrefetcher:self
+                           didCancelPrefetchingURL:url
+                                     forBatchIndex:batchIndex
+                                 withFinishedCount:finishedCount
+                                      skippedCount:skippedCount];
+                }
             });
         }
-        else if (self.finishedCount == self.requestedCount) {
-            [self reportStatus];
-            if (self.completionBlock) {
-                self.completionBlock(self.finishedCount, self.skippedCount);
-                self.completionBlock = nil;
-            }
-            self.progressBlock = nil;
+        
+        [batchItem.prefetchItemsLeft removeAllObjects];
+        batchItem.skippedCount = batchItem.URLs.count - batchItem.finishedCount; // Safety
+        
+        if (werePrefetchItemsLeft) {
+            NSUInteger finishedCount = batchItem.finishedCount;
+            NSUInteger skippedCount = batchItem.skippedCount;
+            
+            dispatch_async_main_queue(^{
+                if (batchItem.completionBlock)
+                    batchItem.completionBlock(finishedCount, skippedCount);
+                
+                if ([self.delegate respondsToSelector:@selector(imagePrefetcher:didCancelForBatchIndex:withFinishedCount:skippedCount:)])
+                    [self.delegate imagePrefetcher:self
+                            didCancelForBatchIndex:batchIndex
+                                 withFinishedCount:finishedCount
+                                      skippedCount:skippedCount];
+            });
         }
-    }];
-}
-
-- (void)reportStatus {
-    NSUInteger total = [self.prefetchURLs count];
-    NSLog(@"Finished prefetching (%@ successful, %@ skipped, timeElasped %.2f)", @(total - self.skippedCount), @(self.skippedCount), CFAbsoluteTimeGetCurrent() - self.startedTime);
-    if ([self.delegate respondsToSelector:@selector(imagePrefetcher:didFinishWithTotalCount:skippedCount:)]) {
-        [self.delegate imagePrefetcher:self
-               didFinishWithTotalCount:(total - self.skippedCount)
-                          skippedCount:self.skippedCount
-        ];
+        
+        [_batchItems removeObjectForKey:batchIndex];
     }
-}
-
-- (void)prefetchURLs:(NSArray *)urls {
-    [self prefetchURLs:urls progress:nil completed:nil];
-}
-
-- (void)prefetchURLs:(NSArray *)urls progress:(SDWebImagePrefetcherProgressBlock)progressBlock completed:(SDWebImagePrefetcherCompletionBlock)completionBlock {
-    [self cancelPrefetching]; // Prevent duplicate prefetch request
-    self.startedTime = CFAbsoluteTimeGetCurrent();
-    self.prefetchURLs = urls;
-    self.completionBlock = completionBlock;
-    self.progressBlock = progressBlock;
-
-    if(urls.count == 0){ 
-        if(completionBlock){
-            completionBlock(0,0);
-        }
-    }else{
-        // Starts prefetching from the very first image on the list with the max allowed concurrency
-        NSUInteger listCount = self.prefetchURLs.count;
-        for (NSUInteger i = 0; i < self.maxConcurrentDownloads && self.requestedCount < listCount; i++) {
-            [self startPrefetchingAtIndex:i];
-        }
-    }
-}
-
-- (void)cancelPrefetching {
-    self.prefetchURLs = nil;
-    self.skippedCount = 0;
-    self.requestedCount = 0;
-    self.finishedCount = 0;
-    [self.manager cancelAll];
 }
 
 @end

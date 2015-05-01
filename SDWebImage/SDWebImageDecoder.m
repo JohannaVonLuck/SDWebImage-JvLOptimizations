@@ -9,19 +9,25 @@
  */
 
 #import "SDWebImageDecoder.h"
+#import "SDWebImage.h"
+#import "OLImage.h"
 
 @implementation UIImage (ForceDecode)
 
 + (UIImage *)decodedImageWithImage:(UIImage *)image {
-    if (image.images) {
+    if (image.images || [image isKindOfClass:[OLImage class]]) {
         // Do not decode animated images
         return image;
     }
-
+    
     CGImageRef imageRef = image.CGImage;
     CGSize imageSize = CGSizeMake(CGImageGetWidth(imageRef), CGImageGetHeight(imageRef));
-    CGRect imageRect = (CGRect){.origin = CGPointZero, .size = imageSize};
-
+    CGRect imageRect = (CGRect) {.origin = CGPointZero, .size = imageSize};
+    
+    NSUInteger imageSizeBytes = imageSize.width * imageSize.height * (CGImageGetBitsPerPixel(imageRef) / 8);
+    if (imageSizeBytes >= 33554432)
+        return image;
+    
     CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
     CGBitmapInfo bitmapInfo = CGImageGetBitmapInfo(imageRef);
 
@@ -45,7 +51,7 @@
         bitmapInfo &= ~kCGBitmapAlphaInfoMask;
         bitmapInfo |= kCGImageAlphaPremultipliedFirst;
     }
-
+    
     // It calculates the bytes-per-row based on the bitsPerComponent and width arguments.
     CGContextRef context = CGBitmapContextCreate(NULL,
             imageSize.width,
@@ -65,7 +71,9 @@
     CGContextRelease(context);
 
     UIImage *decompressedImage = [UIImage imageWithCGImage:decompressedImageRef scale:image.scale orientation:image.imageOrientation];
+    
     CGImageRelease(decompressedImageRef);
+    
     return decompressedImage;
 }
 

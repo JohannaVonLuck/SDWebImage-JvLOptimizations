@@ -7,254 +7,217 @@
  */
 
 #import "UIButton+WebCache.h"
-#import "objc/runtime.h"
 #import "UIView+WebCacheOperation.h"
+#import <objc/runtime.h>
 
-static char imageURLStorageKey;
+static char imageURLKey;
 
 @implementation UIButton (WebCache)
 
-- (NSURL *)sd_currentImageURL {
-    NSURL *url = self.imageURLStorage[@(self.state)];
+@dynamic sd_imageLoadCycle;
 
-    if (!url) {
-        url = self.imageURLStorage[@(UIControlStateNormal)];
-    }
-
-    return url;
+- (id)sd_imageLoadCycle {
+    return objc_getAssociatedObject(self, @selector(sd_imageLoadCycle));
 }
 
-- (NSURL *)sd_imageURLForState:(UIControlState)state {
-    return self.imageURLStorage[@(state)];
+- (void)setSd_imageLoadCycle:(id)sd_imageLoadCycle {
+    objc_setAssociatedObject(self, @selector(sd_imageLoadCycle), sd_imageLoadCycle, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
-- (void)sd_setImageWithURL:(NSURL *)url forState:(UIControlState)state {
-    [self sd_setImageWithURL:url forState:state placeholderImage:nil options:0 completed:nil];
+@dynamic sd_backgroundImageLoadCycle;
+
+- (id)sd_backgroundImageLoadCycle {
+    return objc_getAssociatedObject(self, @selector(sd_backgroundImageLoadCycle));
 }
 
-- (void)sd_setImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder {
-    [self sd_setImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:nil];
-}
-
-- (void)sd_setImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options {
-    [self sd_setImageWithURL:url forState:state placeholderImage:placeholder options:options completed:nil];
-}
-
-- (void)sd_setImageWithURL:(NSURL *)url forState:(UIControlState)state completed:(SDWebImageCompletionBlock)completedBlock {
-    [self sd_setImageWithURL:url forState:state placeholderImage:nil options:0 completed:completedBlock];
-}
-
-- (void)sd_setImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder completed:(SDWebImageCompletionBlock)completedBlock {
-    [self sd_setImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:completedBlock];
-}
-
-- (void)sd_setImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options completed:(SDWebImageCompletionBlock)completedBlock {
-
-    [self setImage:placeholder forState:state];
-    [self sd_cancelImageLoadForState:state];
-    
-    if (!url) {
-        [self.imageURLStorage removeObjectForKey:@(state)];
-        
-        dispatch_main_async_safe(^{
-            NSError *error = [NSError errorWithDomain:SDWebImageErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey : @"Trying to load a nil url"}];
-            if (completedBlock) {
-                completedBlock(nil, error, SDImageCacheTypeNone, url);
-            }
-        });
-        
-        return;
-    }
-    
-    self.imageURLStorage[@(state)] = url;
-
-    __weak __typeof(self)wself = self;
-    id <SDWebImageOperation> operation = [SDWebImageManager.sharedManager downloadImageWithURL:url options:options progress:nil completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, BOOL finished, NSURL *imageURL) {
-        if (!wself) return;
-        dispatch_main_sync_safe(^{
-            __strong UIButton *sself = wself;
-            if (!sself) return;
-            if (image) {
-                [sself setImage:image forState:state];
-            }
-            if (completedBlock && finished) {
-                completedBlock(image, error, cacheType, url);
-            }
-        });
-    }];
-    [self sd_setImageLoadOperation:operation forState:state];
-}
-
-- (void)sd_setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:nil options:0 completed:nil];
-}
-
-- (void)sd_setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:nil];
-}
-
-- (void)sd_setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:options completed:nil];
-}
-
-- (void)sd_setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state completed:(SDWebImageCompletionBlock)completedBlock {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:nil options:0 completed:completedBlock];
-}
-
-- (void)sd_setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder completed:(SDWebImageCompletionBlock)completedBlock {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:completedBlock];
-}
-
-- (void)sd_setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options completed:(SDWebImageCompletionBlock)completedBlock {
-    [self sd_cancelImageLoadForState:state];
-
-    [self setBackgroundImage:placeholder forState:state];
-
-    if (url) {
-        __weak __typeof(self)wself = self;
-        id <SDWebImageOperation> operation = [SDWebImageManager.sharedManager downloadImageWithURL:url options:options progress:nil completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, BOOL finished, NSURL *imageURL) {
-            if (!wself) return;
-            dispatch_main_sync_safe(^{
-                __strong UIButton *sself = wself;
-                if (!sself) return;
-                if (image) {
-                    [sself setBackgroundImage:image forState:state];
-                }
-                if (completedBlock && finished) {
-                    completedBlock(image, error, cacheType, url);
-                }
-            });
-        }];
-        [self sd_setBackgroundImageLoadOperation:operation forState:state];
-    } else {
-        dispatch_main_async_safe(^{
-            NSError *error = [NSError errorWithDomain:SDWebImageErrorDomain code:-1 userInfo:@{NSLocalizedDescriptionKey : @"Trying to load a nil url"}];
-            if (completedBlock) {
-                completedBlock(nil, error, SDImageCacheTypeNone, url);
-            }
-        });
-    }
-}
-
-- (void)sd_setImageLoadOperation:(id<SDWebImageOperation>)operation forState:(UIControlState)state {
-    [self sd_setImageLoadOperation:operation forKey:[NSString stringWithFormat:@"UIButtonImageOperation%@", @(state)]];
-}
-
-- (void)sd_cancelImageLoadForState:(UIControlState)state {
-    [self sd_cancelImageLoadOperationWithKey:[NSString stringWithFormat:@"UIButtonImageOperation%@", @(state)]];
-}
-
-- (void)sd_setBackgroundImageLoadOperation:(id<SDWebImageOperation>)operation forState:(UIControlState)state {
-    [self sd_setImageLoadOperation:operation forKey:[NSString stringWithFormat:@"UIButtonBackgroundImageOperation%@", @(state)]];
-}
-
-- (void)sd_cancelBackgroundImageLoadForState:(UIControlState)state {
-    [self sd_cancelImageLoadOperationWithKey:[NSString stringWithFormat:@"UIButtonBackgroundImageOperation%@", @(state)]];
-}
-
-- (NSMutableDictionary *)imageURLStorage {
-    NSMutableDictionary *storage = objc_getAssociatedObject(self, &imageURLStorageKey);
-    if (!storage)
-    {
-        storage = [NSMutableDictionary dictionary];
-        objc_setAssociatedObject(self, &imageURLStorageKey, storage, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-
-    return storage;
-}
-
-@end
-
-
-@implementation UIButton (WebCacheDeprecated)
-
-- (NSURL *)currentImageURL {
-    return [self sd_currentImageURL];
-}
-
-- (NSURL *)imageURLForState:(UIControlState)state {
-    return [self sd_imageURLForState:state];
+- (void)setSd_backgroundImageLoadCycle:(id)sd_backgroundImageLoadCycle {
+    objc_setAssociatedObject(self, @selector(sd_backgroundImageLoadCycle), sd_backgroundImageLoadCycle, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
 
 - (void)setImageWithURL:(NSURL *)url forState:(UIControlState)state {
-    [self sd_setImageWithURL:url forState:state placeholderImage:nil options:0 completed:nil];
+    [self setImageWithURL:url forState:state placeholderImage:nil options:0 completed:nil];
 }
 
 - (void)setImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder {
-    [self sd_setImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:nil];
+    [self setImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:nil];
 }
 
 - (void)setImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options {
-    [self sd_setImageWithURL:url forState:state placeholderImage:placeholder options:options completed:nil];
+    [self setImageWithURL:url forState:state placeholderImage:placeholder options:options completed:nil];
 }
 
 - (void)setImageWithURL:(NSURL *)url forState:(UIControlState)state completed:(SDWebImageCompletedBlock)completedBlock {
-    [self sd_setImageWithURL:url forState:state placeholderImage:nil options:0 completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, NSURL *imageURL) {
-        if (completedBlock) {
-            completedBlock(image, error, cacheType);
-        }
-    }];
+    [self setImageWithURL:url forState:state placeholderImage:nil options:0 completed:completedBlock];
 }
 
 - (void)setImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder completed:(SDWebImageCompletedBlock)completedBlock {
-    [self sd_setImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, NSURL *imageURL) {
-        if (completedBlock) {
-            completedBlock(image, error, cacheType);
-        }
-    }];
+    [self setImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:completedBlock];
 }
 
 - (void)setImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options completed:(SDWebImageCompletedBlock)completedBlock {
-    [self sd_setImageWithURL:url forState:state placeholderImage:placeholder options:options completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, NSURL *imageURL) {
-        if (completedBlock) {
-            completedBlock(image, error, cacheType);
-        }
-    }];
+    __block NSInteger loadCycle = NSNotFound;
+    
+    dispatch_sync_main_queue_safe(^{
+        [self cancelCurrentImageLoad];
+        
+        objc_setAssociatedObject(self, &imageURLKey, url, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        
+        loadCycle = [self.sd_imageLoadCycle integerValue] + 1;
+        self.sd_imageLoadCycle = [NSNumber numberWithInteger:loadCycle];
+        
+        if (placeholder)
+            [self setImage:placeholder forState:state];
+    });
+    
+    if (url) {
+        __weak UIButton *wself = self;
+        __block UIImage *cachedImage = nil;
+        
+        id <SDWebImageOperation> operation = [SDWebImageManager.sharedManager downloadWithURL:url options:options progress:nil completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, BOOL finished) {
+            if (!wself) return;
+            dispatch_sync_main_queue_safe(^{
+                __strong UIButton *sself = wself;
+                if (!sself || [sself.sd_imageLoadCycle integerValue] != loadCycle) return;
+                
+                if (image) {
+                    UIImage *imageToSet = nil;
+                    
+                    if (!finished && !cachedImage && (options & SDWebImageRefreshCached) && cacheType != SDImageCacheTypeNone) {
+                        cachedImage = image;
+                        
+                        if (!(options & SDWebImageWaitOnCacheResponseBeforeSet))
+                            imageToSet = cachedImage;
+                    } else if (!finished && cachedImage && (options & SDWebImageUseCachedImageOverProgressive)) {
+                        imageToSet = cachedImage;
+                    } else
+                        imageToSet = image;
+                    
+                    if (imageToSet.isReady && [sself imageForState:state] != imageToSet) {
+                        [UIView performWithoutAnimation:^{
+                            [sself setImage:image forState:state];
+                            [sself layoutIfNeeded];
+                        }];
+                    }
+                }
+                
+                if (error || finished) {
+                    cachedImage = nil;
+                    
+                    if (completedBlock) {
+                        completedBlock(image, error, cacheType);
+                    }
+                }
+            });
+        }];
+        
+        [self sd_setImageLoadOperation:operation forKey:@"UIButtonImageLoad"];
+    } else {
+        dispatch_async_main_queue(^{
+            NSError *error = [NSError errorWithDomain:@"SDWebImageErrorDomain" code:-1 userInfo:@{NSLocalizedDescriptionKey : @"Trying to load a nil url"}];
+            if (completedBlock) {
+                completedBlock(nil, error, SDImageCacheTypeNone);
+            }
+        });
+    }
 }
 
 - (void)setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:nil options:0 completed:nil];
+    [self setBackgroundImageWithURL:url forState:state placeholderImage:nil options:0 completed:nil];
 }
 
 - (void)setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:nil];
+    [self setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:nil];
 }
 
 - (void)setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:options completed:nil];
+    [self setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:options completed:nil];
 }
 
 - (void)setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state completed:(SDWebImageCompletedBlock)completedBlock {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:nil options:0 completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, NSURL *imageURL) {
-        if (completedBlock) {
-            completedBlock(image, error, cacheType);
-        }
-    }];
+    [self setBackgroundImageWithURL:url forState:state placeholderImage:nil options:0 completed:completedBlock];
 }
 
 - (void)setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder completed:(SDWebImageCompletedBlock)completedBlock {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, NSURL *imageURL) {
-        if (completedBlock) {
-            completedBlock(image, error, cacheType);
-        }
-    }];
+    [self setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:0 completed:completedBlock];
 }
 
 - (void)setBackgroundImageWithURL:(NSURL *)url forState:(UIControlState)state placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options completed:(SDWebImageCompletedBlock)completedBlock {
-    [self sd_setBackgroundImageWithURL:url forState:state placeholderImage:placeholder options:options completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, NSURL *imageURL) {
-        if (completedBlock) {
-            completedBlock(image, error, cacheType);
-        }
-    }];
+    __block NSInteger loadCycle = NSNotFound;
+    
+    dispatch_sync_main_queue_safe(^{
+        [self cancelCurrentImageLoad];
+        
+        objc_setAssociatedObject(self, &imageURLKey, url, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        
+        loadCycle = [self.sd_backgroundImageLoadCycle integerValue] + 1;
+        self.sd_backgroundImageLoadCycle = [NSNumber numberWithInteger:loadCycle];
+        
+        if (placeholder)
+            [self setBackgroundImage:placeholder forState:state];
+    });
+    
+    if (url) {
+        __weak UIButton *wself = self;
+        __block UIImage *cachedImage = nil;
+        
+        id <SDWebImageOperation> operation = [SDWebImageManager.sharedManager downloadWithURL:url options:options progress:nil completed:^(UIImage *image, NSError *error, SDImageCacheType cacheType, BOOL finished) {
+            if (!wself) return;
+            dispatch_sync_main_queue_safe(^{
+                __strong UIButton *sself = wself;
+                if (!sself || [sself.sd_backgroundImageLoadCycle integerValue] != loadCycle) return;
+                
+                if (image) {
+                    UIImage *imageToSet = nil;
+                    
+                    if (!finished && !cachedImage && (options & SDWebImageRefreshCached) && cacheType != SDImageCacheTypeNone) {
+                        cachedImage = image;
+                        
+                        if (!(options & SDWebImageWaitOnCacheResponseBeforeSet))
+                            imageToSet = cachedImage;
+                    } else if (!finished && cachedImage && (options & SDWebImageUseCachedImageOverProgressive)) {
+                        imageToSet = cachedImage;
+                    } else
+                        imageToSet = image;
+                    
+                    if (imageToSet.isReady && [sself backgroundImageForState:state] != imageToSet) {
+                        [UIView performWithoutAnimation:^{
+                            [sself setBackgroundImage:imageToSet forState:state];
+                            [sself layoutIfNeeded];
+                        }];
+                    }
+                }
+                
+                if (error || finished) {
+                    cachedImage = nil;
+                    
+                    if (completedBlock) {
+                        completedBlock(image, error, cacheType);
+                    }
+                }
+            });
+        }];
+        
+        [self sd_setImageLoadOperation:operation forKey:@"UIButtonImageLoad"];
+    } else {
+        dispatch_async_main_queue(^{
+            NSError *error = [NSError errorWithDomain:@"SDWebImageErrorDomain" code:-1 userInfo:@{NSLocalizedDescriptionKey : @"Trying to load a nil url"}];
+            if (completedBlock) {
+                completedBlock(nil, error, SDImageCacheTypeNone);
+            }
+        });
+    }
 }
 
 - (void)cancelCurrentImageLoad {
-    // in a backwards compatible manner, cancel for current state
-    [self sd_cancelImageLoadForState:self.state];
-}
-
-- (void)cancelBackgroundImageLoadForState:(UIControlState)state {
-    [self sd_cancelBackgroundImageLoadForState:state];
+    dispatch_sync_main_queue_safe(^{
+        [self sd_cancelImageLoadOperationWithKey:@"UIButtonImageLoad"];
+        
+        NSInteger loadCycle = [self.sd_imageLoadCycle integerValue] + 1;
+        self.sd_imageLoadCycle = [NSNumber numberWithInteger:loadCycle];
+        
+        loadCycle = [self.sd_backgroundImageLoadCycle integerValue] + 1;
+        self.sd_backgroundImageLoadCycle = [NSNumber numberWithInteger:loadCycle];
+    });
 }
 
 @end

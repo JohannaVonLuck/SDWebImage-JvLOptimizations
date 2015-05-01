@@ -6,10 +6,13 @@
 //  Copyright (c) 2013 Dailymotion. All rights reserved.
 //
 
-#import <UIKit/UIKit.h>
+#import "SDWebImageCompat.h"
+#import "SDWebImageManager.h"
 
 @interface UIImage (MultiFormat)
 
-+ (UIImage *)sd_imageWithData:(NSData *)data;
++ (instancetype)sd_imageWithData:(NSData *)data;
+
++ (instancetype)sd_imageWithData:(NSData *)data scale:(CGFloat)scale;
 
 @end

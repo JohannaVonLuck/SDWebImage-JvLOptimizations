@@ -10,6 +10,9 @@
 #import "SDWebImageManager.h"
 
 @class SDWebImagePrefetcher;
+typedef void(^SDWebImagePrefetchStartedBlock)(NSNumber *batchIndex);
+typedef void(^SDWebImagePrefetchProgressBlock)(NSURL *imageURL, BOOL success, NSUInteger finishedCount, NSUInteger skippedCount);
+typedef void(^SDWebImagePrefetchCompletionBlock)(NSUInteger finishedCount, NSUInteger skippedCount);
 
 @protocol SDWebImagePrefetcherDelegate <NSObject>
 
@@ -19,49 +22,68 @@
  * Called when an image was prefetched.
  *
  * @param imagePrefetcher The current image prefetcher
- * @param imageURL        The image url that was prefetched
- * @param finishedCount   The total number of images that were prefetched (successful or not)
- * @param totalCount      The total number of images that were to be prefetched
+ * @param imageURL The image url that was prefetched
+ * @param batchIndex The batch index responsible for prefetch
+ * @param finishedCount The total number of images that were prefetched
+ * @param totalCount The total number of images that need to be prefetched
  */
-- (void)imagePrefetcher:(SDWebImagePrefetcher *)imagePrefetcher didPrefetchURL:(NSURL *)imageURL finishedCount:(NSUInteger)finishedCount totalCount:(NSUInteger)totalCount;
+- (void)imagePrefetcher:(SDWebImagePrefetcher *)imagePrefetcher didPrefetchURL:(NSURL *)imageURL forBatchIndex:(NSNumber *)batchIndex withFinishedCount:(NSUInteger)finishedCount skippedCount:(NSUInteger)totalCount;
 
 /**
- * Called when all images are prefetched.
+ * Called when an image was not prefetched due to error.
+ *
  * @param imagePrefetcher The current image prefetcher
- * @param totalCount      The total number of images that were prefetched (whether successful or not)
- * @param skippedCount    The total number of images that were skipped
+ * @param imageURL The image url that was not prefetched
+ * @param error Error associated for failure (if available)
+ * @param batchIndex The batch index responsible for prefetch
+ * @param finishedCount The total number of images that were prefetched
+ * @param totalCount The total number of images that need to be prefetched
  */
-- (void)imagePrefetcher:(SDWebImagePrefetcher *)imagePrefetcher didFinishWithTotalCount:(NSUInteger)totalCount skippedCount:(NSUInteger)skippedCount;
+- (void)imagePrefetcher:(SDWebImagePrefetcher *)imagePrefetcher didFailPrefetchingURL:(NSURL *)imageURL error:(NSError *)error forBatchIndex:(NSNumber *)batchIndex withFinishedCount:(NSUInteger)finishedCount skippedCount:(NSUInteger)totalCount;
+
+/**
+ * Called when an image was not prefetched due to cancellation.
+ *
+ * @param imagePrefetcher The current image prefetcher
+ * @param imageURL The image url that was not prefetched
+ * @param batchIndex The batch index responsible for prefetch
+ * @param finishedCount The total number of images that were prefetched
+ * @param totalCount The total number of images that need to be prefetched
+ */
+- (void)imagePrefetcher:(SDWebImagePrefetcher *)imagePrefetcher didCancelPrefetchingURL:(NSURL *)imageURL forBatchIndex:(NSNumber *)batchIndex withFinishedCount:(NSUInteger)finishedCount skippedCount:(NSUInteger)totalCount;
+
+/**
+ * Called when images are done prefetching.
+ * @param imagePrefetcher The current image prefetcher
+ * @param batchIndex The batch index responsible for prefetch
+ * @param totalCount The total number of images that need to be prefetched
+ * @param skippedCount The total number of images that were skipped
+ */
+- (void)imagePrefetcher:(SDWebImagePrefetcher *)imagePrefetcher didFinishForBatchIndex:(NSNumber *)batchIndex withFinishedCount:(NSUInteger)finishedCount skippedCount:(NSUInteger)skippedCount;
+
+/**
+ * Called when remaining images have been canceled from prefetching.
+ * @param imagePrefetcher The current image prefetcher
+ * @param batchIndex The batch index responsible for prefetch
+ * @param totalCount The total number of images that need to be prefetched
+ * @param skippedCount The total number of images that were skipped
+ */
+- (void)imagePrefetcher:(SDWebImagePrefetcher *)imagePrefetcher didCancelForBatchIndex:(NSNumber *)batchIndex withFinishedCount:(NSUInteger)finishedCount skippedCount:(NSUInteger)skippedCount;
 
 @end
 
-typedef void(^SDWebImagePrefetcherProgressBlock)(NSUInteger noOfFinishedUrls, NSUInteger noOfTotalUrls);
-typedef void(^SDWebImagePrefetcherCompletionBlock)(NSUInteger noOfFinishedUrls, NSUInteger noOfSkippedUrls);
 
 /**
  * Prefetch some URLs in the cache for future use. Images are downloaded in low priority.
  */
 @interface SDWebImagePrefetcher : NSObject
 
-/**
- *  The web image manager
- */
-@property (strong, nonatomic, readonly) SDWebImageManager *manager;
-
-/**
- * Maximum number of URLs to prefetch at the same time. Defaults to 3.
- */
-@property (nonatomic, assign) NSUInteger maxConcurrentDownloads;
+@property (nonatomic, readonly) NSUInteger prefetchURLsCount;
 
 /**
  * SDWebImageOptions for prefetcher. Defaults to SDWebImageLowPriority.
  */
 @property (nonatomic, assign) SDWebImageOptions options;
-
-/**
- * Queue options for Prefetcher. Defaults to Main Queue.
- */
-@property (nonatomic, assign) dispatch_queue_t prefetcherQueue;
 
 @property (weak, nonatomic) id <SDWebImagePrefetcherDelegate> delegate;
 
@@ -76,28 +98,32 @@ typedef void(^SDWebImagePrefetcherCompletionBlock)(NSUInteger noOfFinishedUrls, 
  * and skips images for failed downloads and proceed to the next image in the list
  *
  * @param urls list of URLs to prefetch
+ * @return batchIndex number to reference prefetch from.
  */
-- (void)prefetchURLs:(NSArray *)urls;
+- (NSNumber *)prefetchURLs:(NSArray *)urls;
+- (NSNumber *)prefetchURLs:(NSArray *)urls URLOptions:(NSArray *)urlOptions;
 
 /**
  * Assign list of URLs to let SDWebImagePrefetcher to queue the prefetching,
  * currently one image is downloaded at a time,
  * and skips images for failed downloads and proceed to the next image in the list
  *
- * @param urls            list of URLs to prefetch
- * @param progressBlock   block to be called when progress updates; 
- *                        first parameter is the number of completed (successful or not) requests, 
- *                        second parameter is the total number of images originally requested to be prefetched
+ * @param urls list of URLs to prefetch
+ * @param progressBlock block to be called when progress updates
  * @param completionBlock block to be called when prefetching is completed
- *                        first param is the number of completed (successful or not) requests,
- *                        second parameter is the number of skipped requests
+ * @return batchIndex number to reference prefetch from.
  */
-- (void)prefetchURLs:(NSArray *)urls progress:(SDWebImagePrefetcherProgressBlock)progressBlock completed:(SDWebImagePrefetcherCompletionBlock)completionBlock;
+- (NSNumber *)prefetchURLs:(NSArray *)urls progress:(SDWebImagePrefetchProgressBlock)progressBlock completed:(SDWebImagePrefetchCompletionBlock)completionBlock;
+- (NSNumber *)prefetchURLs:(NSArray *)urls URLOptions:(NSArray *)urlOptions progress:(SDWebImagePrefetchProgressBlock)progressBlock completed:(SDWebImagePrefetchCompletionBlock)completionBlock;
+- (NSNumber *)prefetchURLs:(NSArray *)urls URLOptions:(NSArray *)urlOptions started:(SDWebImagePrefetchStartedBlock)startedBlock progress:(SDWebImagePrefetchProgressBlock)progressBlock completed:(SDWebImagePrefetchCompletionBlock)completionBlock;
+
+- (SDWebImageCombinedOperation *)operationForURL:(NSURL *)url;
 
 /**
  * Remove and cancel queued list
  */
-- (void)cancelPrefetching;
+- (void)cancelAllPrefetching;
+- (void)cancelPrefetchingForBatchIndex:(NSNumber *)batchIndex;
 
 
 @end

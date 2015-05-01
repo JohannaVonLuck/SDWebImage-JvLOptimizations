@@ -6,9 +6,9 @@
  * file that was distributed with this source code.
  */
 
-#import <UIKit/UIKit.h>
 #import "SDWebImageCompat.h"
 #import "SDWebImageManager.h"
+#import "UIImageView+WebCache.h"
 
 /**
  * Integrates SDWebImage async downloading and caching of remote images with UIImageView for highlighted state.
@@ -18,83 +18,97 @@
 /**
  * Set the imageView `highlightedImage` with an `url`.
  *
- * The download is asynchronous and cached.
+ * The downloand is asynchronous and cached.
  *
  * @param url The url for the image.
  */
-- (void)sd_setHighlightedImageWithURL:(NSURL *)url;
+- (void)setHighlightedImageWithURL:(NSURL *)url;
 
 /**
- * Set the imageView `highlightedImage` with an `url` and custom options.
+ * Set the imageView `highlightedImage` with an `url` and a placeholder.
  *
- * The download is asynchronous and cached.
+ * The downloand is asynchronous and cached.
  *
- * @param url     The url for the image.
+ * @param url The url for the image.
+ * @param placeholder The image to be set initially, until the image request finishes.
+ * @see setHighlightedImageWithURL:placeholderImage:options:
+ */
+- (void)setHighlightedImageWithURL:(NSURL *)url placeholderImage:(UIImage *)placeholder;
+
+/**
+ * Set the imageView `highlightedImage` with an `url`, placeholder and custom options.
+ *
+ * The downloand is asynchronous and cached.
+ *
+ * @param url The url for the image.
+ * @param placeholder The image to be set initially, until the image request finishes.
  * @param options The options to use when downloading the image. @see SDWebImageOptions for the possible values.
  */
-- (void)sd_setHighlightedImageWithURL:(NSURL *)url options:(SDWebImageOptions)options;
+- (void)setHighlightedImageWithURL:(NSURL *)url placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options;
 
 /**
  * Set the imageView `highlightedImage` with an `url`.
  *
- * The download is asynchronous and cached.
+ * The downloand is asynchronous and cached.
  *
- * @param url            The url for the image.
- * @param completedBlock A block called when operation has been completed. This block has no return value
+ * @param url The url for the image.
+ * @param completedBlock A block called when operation has been completed. This block as no return value
  *                       and takes the requested UIImage as first parameter. In case of error the image parameter
  *                       is nil and the second parameter may contain an NSError. The third parameter is a Boolean
- *                       indicating if the image was retrived from the local cache or from the network.
- *                       The fourth parameter is the original image url.
+ *                       indicating if the image was retrived from the local cache of from the network.
  */
-- (void)sd_setHighlightedImageWithURL:(NSURL *)url completed:(SDWebImageCompletionBlock)completedBlock;
+- (void)setHighlightedImageWithURL:(NSURL *)url completed:(SDWebImageCompletedBlock)completedBlock;
 
 /**
- * Set the imageView `highlightedImage` with an `url` and custom options.
+ * Set the imageView `highlightedImage` with an `url`, placeholder.
  *
- * The download is asynchronous and cached.
+ * The downloand is asynchronous and cached.
  *
- * @param url            The url for the image.
- * @param options        The options to use when downloading the image. @see SDWebImageOptions for the possible values.
- * @param completedBlock A block called when operation has been completed. This block has no return value
+ * @param url The url for the image.
+ * @param placeholder The image to be set initially, until the image request finishes.
+ * @param completedBlock A block called when operation has been completed. This block as no return value
  *                       and takes the requested UIImage as first parameter. In case of error the image parameter
  *                       is nil and the second parameter may contain an NSError. The third parameter is a Boolean
- *                       indicating if the image was retrived from the local cache or from the network.
- *                       The fourth parameter is the original image url.
+ *                       indicating if the image was retrived from the local cache of from the network.
  */
-- (void)sd_setHighlightedImageWithURL:(NSURL *)url options:(SDWebImageOptions)options completed:(SDWebImageCompletionBlock)completedBlock;
+- (void)setHighlightedImageWithURL:(NSURL *)url placeholderImage:(UIImage *)placeholder completed:(SDWebImageCompletedBlock)completedBlock;
 
 /**
- * Set the imageView `highlightedImage` with an `url` and custom options.
+ * Set the imageView `highlightedImage` with an `url`, placeholder and custom options.
  *
- * The download is asynchronous and cached.
+ * The downloand is asynchronous and cached.
  *
- * @param url            The url for the image.
- * @param options        The options to use when downloading the image. @see SDWebImageOptions for the possible values.
- * @param progressBlock  A block called while image is downloading
- * @param completedBlock A block called when operation has been completed. This block has no return value
+ * @param url The url for the image.
+ * @param placeholder The image to be set initially, until the image request finishes.
+ * @param options The options to use when downloading the image. @see SDWebImageOptions for the possible values.
+ * @param completedBlock A block called when operation has been completed. This block as no return value
  *                       and takes the requested UIImage as first parameter. In case of error the image parameter
  *                       is nil and the second parameter may contain an NSError. The third parameter is a Boolean
- *                       indicating if the image was retrived from the local cache or from the network.
- *                       The fourth parameter is the original image url.
+ *                       indicating if the image was retrived from the local cache of from the network.
  */
-- (void)sd_setHighlightedImageWithURL:(NSURL *)url options:(SDWebImageOptions)options progress:(SDWebImageDownloaderProgressBlock)progressBlock completed:(SDWebImageCompletionBlock)completedBlock;
+- (void)setHighlightedImageWithURL:(NSURL *)url placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options completed:(SDWebImageCompletedBlock)completedBlock;
+
+/**
+ * Set the imageView `highlightedImage` with an `url`, placeholder and custom options.
+ *
+ * The downloand is asynchronous and cached.
+ *
+ * @param url The url for the image.
+ * @param placeholder The image to be set initially, until the image request finishes.
+ * @param options The options to use when downloading the image. @see SDWebImageOptions for the possible values.
+ * @param progressBlock A block called while image is downloading
+ * @param completedBlock A block called when operation has been completed. This block as no return value
+ *                       and takes the requested UIImage as first parameter. In case of error the image parameter
+ *                       is nil and the second parameter may contain an NSError. The third parameter is a Boolean
+ *                       indicating if the image was retrived from the local cache of from the network.
+ */
+- (void)setHighlightedImageWithURL:(NSURL *)url placeholderImage:(UIImage *)placeholder options:(SDWebImageOptions)options progress:(SDWebImageDownloaderProgressBlock)progressBlock completed:(SDWebImageCompletedBlock)completedBlock;
 
 /**
  * Cancel the current download
  */
-- (void)sd_cancelCurrentHighlightedImageLoad;
+- (void)cancelCurrentHighlightedImageLoad;
 
-@end
-
-
-@interface UIImageView (HighlightedWebCacheDeprecated)
-
-- (void)setHighlightedImageWithURL:(NSURL *)url __deprecated_msg("Method deprecated. Use `sd_setHighlightedImageWithURL:`");
-- (void)setHighlightedImageWithURL:(NSURL *)url options:(SDWebImageOptions)options __deprecated_msg("Method deprecated. Use `sd_setHighlightedImageWithURL:options:`");
-- (void)setHighlightedImageWithURL:(NSURL *)url completed:(SDWebImageCompletedBlock)completedBlock __deprecated_msg("Method deprecated. Use `sd_setHighlightedImageWithURL:completed:`");
-- (void)setHighlightedImageWithURL:(NSURL *)url options:(SDWebImageOptions)options completed:(SDWebImageCompletedBlock)completedBlock __deprecated_msg("Method deprecated. Use `sd_setHighlightedImageWithURL:options:completed:`");
-- (void)setHighlightedImageWithURL:(NSURL *)url options:(SDWebImageOptions)options progress:(SDWebImageDownloaderProgressBlock)progressBlock completed:(SDWebImageCompletedBlock)completedBlock __deprecated_msg("Method deprecated. Use `sd_setHighlightedImageWithURL:options:progress:completed:`");
-
-- (void)cancelCurrentHighlightedImageLoad __deprecated_msg("Use `sd_cancelCurrentHighlightedImageLoad`");
+@property (nonatomic, strong) id sd_highlightedImageLoadCycle;
 
 @end

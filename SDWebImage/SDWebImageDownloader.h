@@ -11,11 +11,10 @@
 #import "SDWebImageOperation.h"
 
 typedef NS_OPTIONS(NSUInteger, SDWebImageDownloaderOptions) {
-    SDWebImageDownloaderLowPriority = 1 << 0,
     SDWebImageDownloaderProgressiveDownload = 1 << 1,
 
     /**
-     * By default, request prevent the of NSURLCache. With this flag, NSURLCache
+     * By default, request prevent the use of NSURLCache. With this flag, NSURLCache
      * is used with default policies.
      */
     SDWebImageDownloaderUseNSURLCache = 1 << 2,
@@ -48,7 +47,28 @@ typedef NS_OPTIONS(NSUInteger, SDWebImageDownloaderOptions) {
     /**
      * Put the image in the high priority queue.
      */
-    SDWebImageDownloaderHighPriority = 1 << 7,
+    SDWebImageDownloaderHighPriority = 1 << 8,
+    /**
+     * Put the image in the low priority queue.
+     */
+    SDWebImageDownloaderLowPriority = 1 << 9,
+    
+    
+    // NOTE: JvL modification. --Johanna
+    /**
+     * By default, only images with @2x in their actual filename are considered @2x assets.
+     * This setting treats the file as @2x regardless, and will appropriately set to scale=2
+     * in cases which it is not already.
+     */
+    SDWebImageDownloaderLoadAsRetinaImage = 1 << 14,
+    /**
+     * Setting to signal downloader to listen to prefetcher size limits.
+     */
+    SDWebImageDownloaderUsePrefetcherSizeLimit = 1 << 22,
+    /**
+     * Setting to ignore size limits entirely.
+     */
+    SDWebImageDownloaderIgnoreAllSizeLimits = 1 << 23,
 };
 
 typedef NS_ENUM(NSInteger, SDWebImageDownloaderExecutionOrder) {
@@ -67,27 +87,21 @@ extern NSString *const SDWebImageDownloadStartNotification;
 extern NSString *const SDWebImageDownloadStopNotification;
 
 typedef void(^SDWebImageDownloaderProgressBlock)(NSInteger receivedSize, NSInteger expectedSize);
-
 typedef void(^SDWebImageDownloaderCompletedBlock)(UIImage *image, NSData *data, NSError *error, BOOL finished);
 
-typedef NSDictionary *(^SDWebImageDownloaderHeadersFilterBlock)(NSURL *url, NSDictionary *headers);
+@class SDWebImageDownloaderOperation;
 
 /**
  * Asynchronous downloader dedicated and optimized for image loading.
  */
 @interface SDWebImageDownloader : NSObject
 
-/**
- * Decompressing images that are downloaded and cached can improve peformance but can consume lot of memory.
- * Defaults to YES. Set this to NO if you are experiencing a crash due to excessive memory consumption.
- */
-@property (assign, nonatomic) BOOL shouldDecompressImages;
-
 @property (assign, nonatomic) NSInteger maxConcurrentDownloads;
 
 /**
  * Shows the current amount of downloads that still need to be downloaded
  */
+
 @property (readonly, nonatomic) NSUInteger currentDownloadCount;
 
 
@@ -102,11 +116,6 @@ typedef NSDictionary *(^SDWebImageDownloaderHeadersFilterBlock)(NSURL *url, NSDi
  */
 @property (assign, nonatomic) SDWebImageDownloaderExecutionOrder executionOrder;
 
-/**
- *  Singleton method, returns the shared instance
- *
- *  @return global shared instance of downloader class
- */
 + (SDWebImageDownloader *)sharedDownloader;
 
 /**
@@ -125,7 +134,7 @@ typedef NSDictionary *(^SDWebImageDownloaderHeadersFilterBlock)(NSURL *url, NSDi
  * This block will be invoked for each downloading image request, returned
  * NSDictionary will be used as headers in corresponding HTTP request.
  */
-@property (nonatomic, copy) SDWebImageDownloaderHeadersFilterBlock headersFilter;
+@property (nonatomic, strong) NSDictionary *(^headersFilter)(NSURL *url, NSDictionary *headers);
 
 /**
  * Set a value for a HTTP header to be appended to each download HTTP request.
@@ -143,44 +152,49 @@ typedef NSDictionary *(^SDWebImageDownloaderHeadersFilterBlock)(NSURL *url, NSDi
 - (NSString *)valueForHTTPHeaderField:(NSString *)field;
 
 /**
- * Sets a subclass of `SDWebImageDownloaderOperation` as the default
- * `NSOperation` to be used each time SDWebImage constructs a request
- * operation to download an image.
- *
- * @param operationClass The subclass of `SDWebImageDownloaderOperation` to set 
- *        as default. Passing `nil` will revert to `SDWebImageDownloaderOperation`.
- */
-- (void)setOperationClass:(Class)operationClass;
-
-/**
  * Creates a SDWebImageDownloader async downloader instance with a given URL
  *
  * The delegate will be informed when the image is finish downloaded or an error has happen.
  *
  * @see SDWebImageDownloaderDelegate
  *
- * @param url            The URL to the image to download
- * @param options        The options to be used for this download
- * @param progressBlock  A block called repeatedly while the image is downloading
+ * @param url The URL to the image to download
+ * @param options The options to be used for this download
+ * @param progressBlock A block called repeatedly while the image is downloading
  * @param completedBlock A block called once the download is completed.
- *                       If the download succeeded, the image parameter is set, in case of error,
- *                       error parameter is set with the error. The last parameter is always YES
- *                       if SDWebImageDownloaderProgressiveDownload isn't use. With the
- *                       SDWebImageDownloaderProgressiveDownload option, this block is called
- *                       repeatedly with the partial image object and the finished argument set to NO
- *                       before to be called a last time with the full image and finished argument
- *                       set to YES. In case of error, the finished argument is always YES.
+ *                  If the download succeeded, the image parameter is set, in case of error,
+ *                  error parameter is set with the error. The last parameter is always YES
+ *                  if SDWebImageDownloaderProgressiveDownload isn't use. With the
+ *                  SDWebImageDownloaderProgressiveDownload option, this block is called
+ *                  repeatedly with the partial image object and the finished argument set to NO
+ *                  before to be called a last time with the full image and finished argument
+ *                  set to YES. In case of error, the finished argument is always YES.
  *
  * @return A cancellable SDWebImageOperation
  */
-- (id <SDWebImageOperation>)downloadImageWithURL:(NSURL *)url
-                                         options:(SDWebImageDownloaderOptions)options
-                                        progress:(SDWebImageDownloaderProgressBlock)progressBlock
-                                       completed:(SDWebImageDownloaderCompletedBlock)completedBlock;
+- (SDWebImageDownloaderOperation *)downloadImageWithURL:(NSURL *)url
+                                                options:(SDWebImageDownloaderOptions)options
+                                               progress:(SDWebImageDownloaderProgressBlock)progressBlock
+                                              completed:(SDWebImageDownloaderCompletedBlock)completedBlock;
+
+- (SDWebImageDownloaderOperation *)downloaderOperationForURL:(NSURL *)url;
 
 /**
  * Sets the download queue suspension state
  */
 - (void)setSuspended:(BOOL)suspended;
+
+
+// JvL Additions //
+
+@property (assign, nonatomic) NSUInteger maxImageDownloadSize; // bytes
+@property (assign, nonatomic) NSUInteger maxGifImageDownloadSize; // bytes
+@property (assign, nonatomic) NSUInteger maxPrefetchedImageDownloadSize; // bytes
+@property (assign, nonatomic) NSUInteger maxPrefetchedGifImageDownloadSize; // bytes
+
+@property (assign, nonatomic) NSUInteger highPriorityOperations;
+@property (assign, nonatomic) NSUInteger medPriorityOperations;
+
+- (void)recalculateReadyStatuses;
 
 @end
